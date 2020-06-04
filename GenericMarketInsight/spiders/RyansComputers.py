@@ -41,10 +41,6 @@ class RyanscomputersSpider(scrapy.Spider):
             '.product-logo img::attr(src)').get()] =\
             self.brand_corrections.get(brand, brand)
         self.brand_cache_completion -= 1
-        yield {
-            response.css(
-                '.product-logo img::attr(src)').get(): brand,
-        }
 
     def parse(self, response):
         # Populate url-brand dictionary.
@@ -62,8 +58,8 @@ class RyanscomputersSpider(scrapy.Spider):
 
         # Wait until populated
         while self.brand_cache_completion != 0:
-            sleep(1)
-            yield
+            sleep(0.01)
+            yield None
 
         self.log("BRAND CACHE DONE ({} BRANDS)".format(
             len(self.brand_cache)), logging.INFO)
@@ -138,7 +134,7 @@ class RyanscomputersSpider(scrapy.Spider):
         reviews = []
         for comment in response.css('.comments'):
             reviews.append({
-                'stars': len(comment.css('.fa-star')),
+                'rating': len(comment.css('.fa-star')),
                 'username': comment.css('p > span::text').get().strip(),
                 'comment': (comment.css('p:last-child::text').get() or '').strip(),
             })
@@ -149,14 +145,14 @@ class RyanscomputersSpider(scrapy.Spider):
                 tr.css('td:last-child::text').get().strip()
 
         yield {
+            'id': details.css("p > span::text").get().strip(),
             'title': details.css(".title::text").get().strip(),
             'reviews': reviews,
             'category': category,
             'subcategory1': subcategory1,
             'subcategory2': subcategory2,
             'brand': brand,
-            'productId': details.css("p > span::text").get().strip(),
-            'priceOld': (details.css('.old-price::text').get() or '0').strip(),
+            'price_old': (details.css('.old-price::text').get() or '0').strip(),
             'price': (details.css('.price::text').get() or '0').strip(),
-            'specs': specs,
+            'specifications': specs,
         }

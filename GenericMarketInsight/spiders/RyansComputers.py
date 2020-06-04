@@ -25,22 +25,21 @@ def remove_puncts(text):
 
 
 class RyanscomputersSpider(scrapy.Spider):
-    brand_corrections = {
-        'A Data': 'ADATA',
-        'A4 Tech': 'A4TECH',
-    }
-
     name = 'RyansComputers'
     allowed_domains = ['ryanscomputers.com', 'www.ryanscomputers.com']
     start_urls = ['https://ryanscomputers.com']
     brand_cache = {}
     brand_cache_completion = 0
+    brands = set()
 
-    def populate_brand_cache(self, response, brand):
+    def parse_and_populate_brand_cache(self, response, brand):
         self.brand_cache[response.css(
-            '.product-logo img::attr(src)').get()] =\
-            self.brand_corrections.get(brand, brand)
+            '.product-logo img::attr(src)').get()] = brand
         self.brand_cache_completion -= 1
+        self.brands.add(brand)
+        yield {
+            'brand_name': brand,
+        }
 
     def parse(self, response):
         # Populate url-brand dictionary.
@@ -49,7 +48,7 @@ class RyanscomputersSpider(scrapy.Spider):
         for brand in selection:
             yield response.follow(
                 brand.css('::attr(href)').get().strip(),
-                self.populate_brand_cache, cb_kwargs={
+                self.parse_and_populate_brand_cache, cb_kwargs={
                     'brand': brand.css('::text').get().strip(),
                 })
 
@@ -92,8 +91,8 @@ class RyanscomputersSpider(scrapy.Spider):
                     }
                 )
 
-    def match_brand(self, brand_filters, title):
-        for brand_filter in brand_filters:
+    def match_brand(self, title):
+        for brand_filter in self.brands:
             if remove_puncts(title.lower()).startswith(
                     remove_puncts(brand_filter.lower())):
                 return brand_filter
@@ -111,7 +110,14 @@ class RyanscomputersSpider(scrapy.Spider):
                 })
 
         brand_filters = [brand.strip() for brand in response.css(
-            '.default-brand-filters button::text').extract()]
+            '.default-brand-filters button::text').extract()
+            if brand.strip() not in self.brands]
+
+        for brand in brand_filters:
+            self.brands.add(brand)
+            yield {
+                'brand_name': brand,
+            }
 
         brand_filters.extend(self.brand_cache.values())
 
@@ -125,7 +131,6 @@ class RyanscomputersSpider(scrapy.Spider):
                     'subcategory1': subcategory1,
                     'subcategory2': subcategory2,
                     'brand': cache_hit if cache_hit else self.match_brand(
-                        brand_filters,
                         box.css('.product-title-grid::text').get()),
                 })
 

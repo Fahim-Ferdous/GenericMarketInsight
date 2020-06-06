@@ -26,6 +26,8 @@ class GenericmarketinsightPipeline:
             'JBL': 'JBL by Harman',
         }
 
+        self.item_url = {}
+
     def open_spider(self, spider):
         self.db = models.create_db_session(
             getattr(spider, 'dburi', models.DEFAULT_DBURI))
@@ -40,11 +42,28 @@ class GenericmarketinsightPipeline:
         self.db.close()
         logger.info("Parsed %d products" % self.load_count)
 
-    def process_item(self, item, _):
-        if item.get('price'):
+    def process_reviews(self, item, _):
+        self.db.add_all([
+            models.Review(**item) for item in
+            item['collection_review']])
+
+        return item
+
+    def process_questions(self, item, spider):
+        # raise DropItem("NotImplemented(collection_question)")
+        return item
+
+    def process_item(self, item, spider):
+        if 'price_regular' in item:
             return self.process_product(item)
-        if item.get('brand_name'):
+        if 'brand_name' in item:
             return self.process_brand(item)
+        if 'collection_review' in item:
+            return self.process_reviews(item, spider)
+        if 'collection_question' in item:
+            return self.process_questions(item, spider)
+
+        raise DropItem("NotImplemented")
 
     def process_brand(self, item):
         name = item['brand_name']
@@ -66,20 +85,43 @@ class GenericmarketinsightPipeline:
 
     def process_product(self, item):
         if item['id'] in self.item_set:
-            raise DropItem("Duplicate product id %s" % item['id'])
+            raise DropItem("Duplicate product")
 
         self.item_set.add(item['id'])
+        self.item_url[item['id']] = item['url']
 
+        item['price_regular'] = int(item['price_regular'].replace(',', ''))
         item['price'] = int(item['price'].replace(',', ''))
-        item['price_old'] = int(item['price_old'].replace(',', ''))
+
+        brand = self.brand_corrections.get(item['brand'], item['brand'])
+        if not self.brands.get(brand):
+            brand_item = models.Brand(title=brand)
+            self.brands[brand] = brand_item
 
         db_item = item.copy()
-        db_item['brand'] = db_item['brand'] and self.brands[
-            self.brand_corrections.get(db_item['brand'], db_item['brand'])]
+        status = db_item['status']
+        if status.endswith('৳'):
+            db_item['status'] = models.ItemStatusEnum.AVAILABLE
+        elif status == "Out Of Stock":
+            db_item['status'] = models.ItemStatusEnum.OUTOFSTOCK
+        elif status == "Discontinued":
+            db_item['status'] = models.ItemStatusEnum.DISCONTINUED
+        elif status == "Pre Order":
+            db_item['status'] = models.ItemStatusEnum.PREORDER
+        elif status == "Up Coming":
+            db_item['status'] = models.ItemStatusEnum.UPCOMING
+        elif status == "Call for Price":
+            db_item['status'] = models.ItemStatusEnum.CALLFORPRICE
+        else:
+            # TODO: modify logger's dropped method to be more user friendly.
+            raise DropItem("Item {} has unknown status {}".format(
+                db_item['id'], status))
 
-        db_item['reviews'] = [
-            models.Review(**review) for review in item['reviews']
-        ]
+        db_item['brand'] = self.brands[brand]
+
+        # db_item['reviews'] = [
+        #     models.Review(**review) for review in item['reviews']
+        # ]
 
         db_item['specifications'] = [
             models.Specification(key=spec[0], value=spec[1])

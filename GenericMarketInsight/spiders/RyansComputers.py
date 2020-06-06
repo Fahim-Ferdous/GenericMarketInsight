@@ -1,27 +1,15 @@
 # -*- coding: utf-8 -*-
 import logging
-import string
 from time import sleep
-from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
+from urllib.parse import urlparse
 
 import scrapy
 
-
-def update_url_query(url, query):
-    parsed = list(urlparse(url))
-    qs_items = dict(parse_qsl(parsed[4]))
-    qs_items.update(query.items())
-    parsed[4] = urlencode(qs_items)
-
-    return urlunparse(parsed)
+from GenericMarketInsight.utils import remove_puncts, update_url_query
 
 
 def update_limit_qs(link, limit=72):
     return update_url_query(link, {'limit': limit})
-
-
-def remove_puncts(text):
-    return ''.join([' ' if c in string.punctuation else c for c in text])
 
 
 class RyanscomputersSpider(scrapy.Spider):
@@ -68,8 +56,8 @@ class RyanscomputersSpider(scrapy.Spider):
             category = item.css('::text').get().strip()
             subcategory1 = None
             for anchor in item.css('a'):
-                subcategory1 = anchor.css(
-                    "::text").get().strip() if anchor.attrib['class'] == "head-menu"\
+                subcategory1 = anchor.css("::text").get().strip() \
+                    if anchor.attrib['class'] == "head-menu"\
                     else subcategory1
                 subcategory2 = None
                 if anchor.attrib['class'] == 'nav-link':
@@ -127,21 +115,25 @@ class RyanscomputersSpider(scrapy.Spider):
             yield response.follow(
                 box.css('.product-title-grid::attr(href)').get(),
                 self.parse_product, cb_kwargs={
-                    'category': category,
-                    'subcategory1': subcategory1,
-                    'subcategory2': subcategory2,
+                    'category': [
+                        category,
+                        subcategory1,
+                        subcategory2,
+                    ],
                     'brand': cache_hit if cache_hit else self.match_brand(
                         box.css('.product-title-grid::text').get()),
                 })
 
-    def parse_product(self, response, category, subcategory1, subcategory2, brand):
+    def parse_product(self, response, category, brand):
         details = response.css('.produc-details-short')
         reviews = []
+        # TODO: Parse all reviews (pagination?) and make a different review item
         for comment in response.css('.comments'):
             reviews.append({
                 'rating': len(comment.css('.fa-star')),
                 'username': comment.css('p > span::text').get().strip(),
-                'comment': (comment.css('p:last-child::text').get() or '').strip(),
+                'comment': (comment.css(
+                    'p:last-child::text').get() or '').strip(),
             })
 
         specs = {}
@@ -153,11 +145,13 @@ class RyanscomputersSpider(scrapy.Spider):
             'id': details.css("p > span::text").get().strip(),
             'title': details.css(".title::text").get().strip(),
             'reviews': reviews,
-            'category': category,
-            'subcategory1': subcategory1,
-            'subcategory2': subcategory2,
+            'category': category[0],
+            'subcategory1': category[1],
+            'subcategory2': category[2],
             'brand': brand,
-            'price_old': (details.css('.old-price::text').get() or '0').strip(),
             'price': (details.css('.price::text').get() or '0').strip(),
+            'price_regular': (details.css(
+                '.old-price::text').get() or '0').strip(),
             'specifications': specs,
+            'url': response.request.url,
         }

@@ -1,12 +1,22 @@
 # -*- coding: utf-8 -*-
 
+from enum import IntEnum
 from json import loads
 
-from sqlalchemy import Column, ForeignKey, Integer, String, create_engine
+from sqlalchemy import Column, Enum, ForeignKey, Integer, String, create_engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship, sessionmaker
 
 Base = declarative_base()
+
+
+class ItemStatusEnum(IntEnum):
+    DISCONTINUED = -1
+    OUTOFSTOCK = 0
+    AVAILABLE = 1
+    PREORDER = 2
+    UPCOMING = 3
+    CALLFORPRICE = 4
 
 
 class Product(Base):
@@ -18,8 +28,10 @@ class Product(Base):
     subcategory1 = Column(String)
     subcategory2 = Column(String)
     brand = Column(String)
-    price_old = Column(Integer)
+    price_regular = Column(Integer)
     price = Column(Integer)
+    url = Column(String)
+    status = Column(Enum(ItemStatusEnum))
 
     reviews = relationship("Review", back_populates="product")
     specifications = relationship("Specification", back_populates="product")

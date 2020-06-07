@@ -12,7 +12,6 @@ def update_limit_qs(link, limit=72):
 
 
 class RyanscomputersSpider(scrapy.Spider):
-    # TODO: Parse offers.
     name = 'RyansComputers'
     allowed_domains = ['ryanscomputers.com', 'www.ryanscomputers.com']
     start_urls = ['https://ryanscomputers.com']

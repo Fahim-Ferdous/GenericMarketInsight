@@ -22,6 +22,7 @@ def extract_locations(xml):
 class StartechSpider(scrapy.Spider):
     # NOTE: Star Tech's sitemap is unmaintained,
     # hence scrapy.Spider is inherited.
+    # TODO: Parse offers.
     name = 'StarTech'
     allowed_domains = ['www.startech.com.bd']
     start_urls = ['https://www.startech.com.bd/']

@@ -28,7 +28,7 @@ class Platform(Base):
     products = relationship("Product", back_populates="platform")
 
 
-# COMBAK: Add product views field.
+# TODO: Add product views field.
 class Product(Base):
     __tablename__ = "products"
 

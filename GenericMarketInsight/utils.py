@@ -27,7 +27,7 @@ def remove_puncts(text):
 class UniqueFollowMixin:
     visited = set()
 
-    def follow_once(self, response, url, *args, **kwargs)
+    def follow_once(self, response, url, *args, **kwargs):
         url = url.lower().strip()
         if url not in self.visited:
             self.visited.add(url)

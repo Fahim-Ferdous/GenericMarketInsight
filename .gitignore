@@ -213,3 +213,5 @@ dmypy.json
 *.log
 logfile
 jobdir
+datadir/**
+!*/.keep

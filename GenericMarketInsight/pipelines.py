@@ -6,6 +6,8 @@
 # See: https://docs.scrapy.org/en/latest/topics/item-pipeline.html
 
 
+from urllib.parse import urlparse
+
 from scrapy.exceptions import DropItem
 
 import models
@@ -22,6 +24,7 @@ class PreProcessor:
         product['price_regular'] = int(
             product['price_regular'].replace(',', ''))
         product['price'] = int(product['price'].replace(',', ''))
+        product['url'] = urlparse(product['url']).path
 
         return product
 
@@ -41,6 +44,7 @@ class StarTechPreProcessor(PreProcessor):
     def preprocess_product(self, product):
         if product['status'].endswith('৳'):
             product['status'] = 'Available'
+        product['code'] = product['id']
         return super().preprocess_product(product)
 
 
@@ -68,6 +72,8 @@ class Pipeline:
             'jbl': 'JBL by Harman',
         }
 
+        self.platform = None
+
         self.preprocessor = None
         Pipeline.ninstances += 1
 
@@ -87,6 +93,23 @@ class Pipeline:
         elif spider.name == 'StarTech':
             self.preprocessor = StarTechPreProcessor()
 
+        if len(spider.start_urls) > 1:
+            spider.log('. '.join([
+                "Should have only one start URL",
+                "Have {} URLs",
+                "Picking up the <{}> as the main platform URL"]).format(
+                len(spider.start_urls)), spider.start_urls[0])
+        # Get or set the Platform object.
+        platform_url = urlparse(spider.start_urls[0]).netloc
+        platform_title = spider.platform_title
+
+        self.platform = Pipeline.db.query(models.Platform). \
+            filter(models.Platform.title == platform_title). \
+            filter(models.Platform.url == platform_url).first()
+        if not self.platform:
+            self.platform = models.Platform(title=platform_title, url=platform_url)
+            Pipeline.db.add(self.platform)
+
     def close_spider(self, _):
         Pipeline.ninstances -= 1
         if Pipeline.ninstances == 0:
@@ -98,6 +121,7 @@ class Pipeline:
             cls(**item) for item in
             self.preprocessor.fix_prefix_collection(
                 item['collection'])])
+        return item
 
     def process_item(self, item, _):
         if 'price_regular' in item:
@@ -168,6 +192,8 @@ class Pipeline:
             raise DropItem("Item {} has unknown status {}".format(db_item['id'], status))
 
         db_item['brand'] = self.get_set_brand(item['brand'])
+
+        db_item['platform'] = self.platform
 
         db_item['specifications'] = [
             models.Specification(key=spec[0], value=spec[1])

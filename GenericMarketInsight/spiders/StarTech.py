@@ -2,40 +2,28 @@
 import logging
 from urllib.parse import urljoin
 
-import lxml
 import scrapy
 
-from GenericMarketInsight.utils import update_url_query
+from GenericMarketInsight.utils import update_url_query, extract_locations, \
+    UniqueFollowMixin
 
 
 def update_limit_qs(link, limit=90):
     return update_url_query(link, {'limit': limit})
 
 
-def extract_locations(xml):
-    et = lxml.etree.fromstring(xml)
-    for location in et.xpath(
-            './n:url/n:loc/text()', namespaces={'n': et.nsmap[None]}):
-        yield location
-
-
-class StartechSpider(scrapy.Spider):
+class StartechSpider(scrapy.Spider, UniqueFollowMixin):
     # NOTE: Star Tech's sitemap is unmaintained,
     # hence scrapy.Spider is inherited.
     # TODO: Parse offers.
     name = 'StarTech'
+    platform_title = 'Star Tech'
     allowed_domains = ['www.startech.com.bd']
     start_urls = ['https://www.startech.com.bd/']
-    visited = set()
-    product_ids = set()
 
-    # NOTE: Let's not use update_limit_qs, it makes caching a nightmare.
-    def follow_once(self, response, url, *args, **kwargs):
-        url = url.lower().strip()
-        if url not in self.visited:
-            self.visited.add(url)
-            return response.follow(url, *args, **kwargs)
-        return None
+    def __init__(self):
+        self.product_ids = set()
+        super(StartechSpider, self).__init__()
 
     def parse_sitemap_location(self, response):
         if response.css('div.price-wrap > ins'):

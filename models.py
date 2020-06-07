@@ -18,6 +18,16 @@ class ItemStatusEnum(IntEnum):
     CALLFORPRICE = 4
 
 
+class Platform(Base):
+    __tablename__ = "platforms"
+
+    id = Column(Integer, primary_key=True)
+    url = Column(String)
+    title = Column(String)
+
+    products = relationship("Product", back_populates="platform")
+
+
 # COMBAK: Add product views field.
 class Product(Base):
     __tablename__ = "products"
@@ -29,6 +39,7 @@ class Product(Base):
     subcategory2 = Column(String)
     price_regular = Column(Integer)
     price = Column(Integer)
+    code = Column(String, index=True)
     url = Column(String)
     status = Column(Enum(ItemStatusEnum))
 
@@ -38,6 +49,9 @@ class Product(Base):
 
     brand_id = Column(Integer, ForeignKey("brands.id"))
     brand = relationship("Brand", back_populates="products")
+
+    platform_id = Column(Integer, ForeignKey("platforms.id"), nullable=False)
+    platform = relationship("Platform", back_populates="products")
 
 
 class Brand(Base):

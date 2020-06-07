@@ -1,24 +1,28 @@
 # -*- coding: utf-8 -*-
 import logging
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urljoin
 
 import scrapy
 
-from GenericMarketInsight.utils import remove_puncts, update_url_query
+from GenericMarketInsight.utils import remove_puncts, update_url_query, \
+    extract_locations, UniqueFollowMixin
 
 
 def update_limit_qs(link, limit=72):
     return update_url_query(link, {'limit': limit})
 
 
-class RyanscomputersSpider(scrapy.Spider):
+class RyanscomputersSpider(scrapy.Spider, UniqueFollowMixin):
     name = 'RyansComputers'
+    platform_title = 'Star Tech'
     allowed_domains = ['ryanscomputers.com', 'www.ryanscomputers.com']
     start_urls = ['https://ryanscomputers.com']
-    brand_cache = {}
-    brand_cache_completion = 0
-    brands = set()
-    visited = set()
+
+    def __init__(self):
+        super(RyanscomputersSpider, self).__init__()
+        self.brand_cache = {}
+        self.brand_cache_completion = 0
+        self.brands = set()
 
     def parse_and_populate_brand_cache(self, response, brand):
         self.brand_cache[response.css(
@@ -27,13 +31,22 @@ class RyanscomputersSpider(scrapy.Spider):
         self.brands.add(brand)
         if self.brand_cache_completion == 0:
             yield response.follow(self.start_urls[0], self.parse_main)
+            yield response.follow(
+                urljoin(self.start_urls[0], 'category-sitemap.xml'),
+                self.parse_category_sitemap)
+        # TODO: Parse  products sitemap.
+
+    def parse_category_sitemap(self, response):
+        for location in extract_locations(response.body):
+            yield self.follow_once(response, location, self.parse_grid)
 
     def parse(self, response):
         # Populate url-brand dictionary.
         selection = response.css('#brandsModal li a')
         self.brand_cache_completion = len(selection)
         for brand in selection:
-            yield response.follow(
+            yield self.follow_once(
+                response,
                 brand.css('::attr(href)').get().strip(),
                 self.parse_and_populate_brand_cache, cb_kwargs={
                     'brand': brand.css('::text').get().strip(),
@@ -65,12 +78,15 @@ class RyanscomputersSpider(scrapy.Spider):
                         path.startswith('/grid/all-'):
                     continue
 
-                yield response.follow(
+                yield self.follow_once(
+                    response,
                     update_limit_qs(link),
                     self.parse_grid, cb_kwargs={
-                        'category': category,
-                        'subcategory1': subcategory1,
-                        'subcategory2': subcategory2,
+                        'category': [
+                            category,
+                            subcategory1,
+                            subcategory2,
+                        ]
                     }
                 )
 
@@ -82,14 +98,27 @@ class RyanscomputersSpider(scrapy.Spider):
         self.log("NO BRANDS FOR {}".format(title), logging.WARNING)
         return None
 
-    def parse_grid(self, response, category, subcategory1, subcategory2):
+    def parse_grid(self, response, category=None):
+        if not category:
+            category = [None, None, None]
+            breadcrumbs = response.css(
+                '.breadcrumb-wraper li:not([class=home]) span::text'
+            ).extract()
+            for i, crumb in enumerate(breadcrumbs):
+                if i >= len(category):
+                    self.log("Grid <{}> has {} categoricals {}".format(
+                        response.request.url, len(breadcrumbs), breadcrumbs),
+                        logging.WARNING)
+                    break
+                category[i] = crumb.strip()
+
         next_page = response.css("a[rel=next]::attr(href)").get()
         if next_page:
-            yield response.follow(
-                update_limit_qs(next_page), self.parse_grid, cb_kwargs={
-                    'category': category,
-                    'subcategory1': subcategory1,
-                    'subcategory2': subcategory2,
+            yield self.follow_once(
+                response,
+                update_limit_qs(next_page),
+                self.parse_grid, cb_kwargs={
+                    'category': category
                 })
 
         brand_filters = [
@@ -104,29 +133,28 @@ class RyanscomputersSpider(scrapy.Spider):
 
         for box in response.css(".product-box"):
             product_url = box.css('.product-title-grid::attr(href)').get()
-            if product_url in self.visited:
-                continue
-            self.visited.add(product_url)
             cache_hit = self.brand_cache.get(
                 box.css('.product-logo img::attr(src)').get())
-            yield response.follow(
+            yield self.follow_once(
+                response,
                 product_url,
-                self.parse_product, cb_kwargs={
-                    'category': [
-                        category,
-                        subcategory1,
-                        subcategory2,
-                    ],
+                self.parse_product,
+                cb_kwargs={
+                    'category': category,
                     'brand': cache_hit if cache_hit else self.match_brand(
                         box.css('.product-title-grid::text').get()),
                 })
 
     def parse_product(self, response, category, brand):
-        details = response.css('.produc-details-short')
-        # FIXME: This is the product code. The real ID is a number.
-        product_id = details.css("p > span::text").get().strip()
+        if response.css('h3 > i'):
+            self.log("PRODUCT DOES NOT EXIST <{}>".format(
+                response.request.url), logging.WARNING)
+            return
 
-        # TODO: Parse all reviews (pagination?) and make a review item
+        details = response.css('.produc-details-short')
+        product_id = response.css('input[name=product_id]::attr(value)').get()
+
+        # XXX: This site does not have pagination for product reviews.
         yield {
             'type': 'review',
             'collection': [{
@@ -154,5 +182,6 @@ class RyanscomputersSpider(scrapy.Spider):
             'price_regular': (details.css(
                 '.old-price::text').get() or '0').strip(),
             'specifications': specs,
+            'code': details.css("p > span::text").get().strip(),
             'url': response.request.url,
         }

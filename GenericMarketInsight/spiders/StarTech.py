@@ -70,12 +70,6 @@ class StartechSpider(scrapy.Spider):
             for i in range(start, upto):
                 yield response.follow(
                     base_url + str(i), self.parse_product)
-        # for anchor in\
-        #     ['/xfx-rx570-rs-8gb-xxx-edition-graphics-card',
-        #      '/budget-pc-05',
-        #      '/western-digital-blue-1tb-sata-hard-disk']:
-        # anchor = anchor.strip()
-        # yield response.follow(anchor, self.parse_product)
 
     def parse_grid(self, response):
         for anchor in response.css('h4.product-name a::attr(href)').extract():
@@ -89,13 +83,14 @@ class StartechSpider(scrapy.Spider):
 
     def parse_product_question(self, response, product_id):
         yield {
-            'collection_question': [{
+            'type': 'question',
+            'collection': [{
                 'product_id': product_id,
                 'username': question.css('h5.question::text').get().strip(),
                 'question': (
-                    question.css('h6.questioner::text').get() or '').strip(),
+                        question.css('h6.questioner::text').get() or '').strip(),
                 'answer': (
-                    question.css('p.answer::text').get() or '').strip(),
+                        question.css('p.answer::text').get() or '').strip(),
             } for question in response.css('.question-wrap')]
         }
 
@@ -108,7 +103,8 @@ class StartechSpider(scrapy.Spider):
 
     def parse_product_reviews(self, response, product_id):
         yield {
-            'collection_review': [{
+            'type': 'review',
+            'collection': [{
                 'product_id': product_id,
                 'rating': len(comment.css('.fa-star')),
                 'username': comment.css('h6.answerer::text').get().strip(),
@@ -154,7 +150,7 @@ class StartechSpider(scrapy.Spider):
 
         specs = {}
         for table_row in response.css('.data-table tbody tr'):
-            specs[table_row.css('td:first-child::text').get().strip()] =\
+            specs[table_row.css('td:first-child::text').get().strip()] = \
                 table_row.css('td:last-child::text').get().strip()
 
         price = response.css('.product-price::text').get()[:-1]

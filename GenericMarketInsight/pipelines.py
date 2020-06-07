@@ -6,101 +6,152 @@
 # See: https://docs.scrapy.org/en/latest/topics/item-pipeline.html
 
 
-from copy import copy
-
 from scrapy.exceptions import DropItem
-from scrapy.utils.log import logger
 
 import models
 
 
-class GenericmarketinsightPipeline:
+class PreProcessor:
+    id_prefix = ''
+
     def __init__(self):
-        self.db = None
+        pass
+
+    def preprocess_product(self, product):
+        product['id'] = self.id_prefix + product['id']
+        product['price_regular'] = int(
+            product['price_regular'].replace(',', ''))
+        product['price'] = int(product['price'].replace(',', ''))
+
+        return product
+
+    def fix_prefix_collection(self, collection, key='product_id'):
+        """Prepend `id_prefix' to collection's element's value for `key'"""
+        for idx in range(len(collection)):
+            collection[idx][key] = self.id_prefix + collection[idx][key]
+        return collection
+
+
+class StarTechPreProcessor(PreProcessor):
+    id_prefix = 'stech'
+
+    def __init__(self):
+        super(StarTechPreProcessor, self).__init__()
+
+    def preprocess_product(self, product):
+        if product['status'].endswith('৳'):
+            product['status'] = 'Available'
+        return super().preprocess_product(product)
+
+
+class RyansComputersPreProcessor(PreProcessor):
+    id_prefix = 'ryans'
+
+    def __init__(self):
+        super(RyansComputersPreProcessor, self).__init__()
+
+    def preprocess_product(self, product):
+        product['status'] = 'Available'
+        return super().preprocess_product(product)
+
+
+class Pipeline:
+    db = None
+    ninstances = 0
+    brands = {}
+
+    def __init__(self):
         self.item_set = set()
-        self.brands = {}
-        self.load_count = 0
         self.brand_corrections = {
-            'A Data': 'ADATA',
-            'A4 Tech': 'A4TECH',
-            'JBL': 'JBL by Harman',
+            'a data': 'ADATA',
+            'a4 tech': 'A4TECH',
+            'jbl': 'JBL by Harman',
         }
 
-        self.item_url = {}
+        self.preprocessor = None
+        Pipeline.ninstances += 1
 
     def open_spider(self, spider):
-        self.db = models.create_db_session(
-            getattr(spider, 'dburi', models.DEFAULT_DBURI))
+        if not Pipeline.db:
+            Pipeline.db = models.create_db_session(
+                getattr(spider, 'dburi', models.DEFAULT_DBURI))
 
-        self.brands = {i.title: i for i in self.db.query(models.Brand).all()}
+        Pipeline.brands = {
+            i.title.lower(): i for i in Pipeline.db.query(models.Brand).all()}
 
         self.item_set = set(
-            i[0] for i in self.db.query(models.Product.id).all())
+            i[0] for i in Pipeline.db.query(models.Product.id).all())
+
+        if spider.name == 'RyansComputers':
+            self.preprocessor = RyansComputersPreProcessor()
+        elif spider.name == 'StarTech':
+            self.preprocessor = StarTechPreProcessor()
 
     def close_spider(self, _):
-        self.db.commit()
-        self.db.close()
-        logger.info("Parsed %d products" % self.load_count)
+        Pipeline.ninstances -= 1
+        if Pipeline.ninstances == 0:
+            Pipeline.db.commit()
+            Pipeline.db.close()
 
-    def process_reviews(self, item, _):
-        self.db.add_all([
-            models.Review(**item) for item in
-            item['collection_review']])
+    def process_collection(self, item, cls):
+        Pipeline.db.add_all([
+            cls(**item) for item in
+            self.preprocessor.fix_prefix_collection(
+                item['collection'])])
 
-        return item
-
-    def process_questions(self, item, spider):
-        # raise DropItem("NotImplemented(collection_question)")
-        return item
-
-    def process_item(self, item, spider):
+    def process_item(self, item, _):
         if 'price_regular' in item:
             return self.process_product(item)
-        if 'brand_name' in item:
-            return self.process_brand(item)
-        if 'collection_review' in item:
-            return self.process_reviews(item, spider)
-        if 'collection_question' in item:
-            return self.process_questions(item, spider)
+        if 'collection' in item:
+            if item['type'] == 'review':
+                return self.process_collection(item, models.Review)
+            if item['type'] == 'question':
+                return self.process_collection(item, models.Question)
 
         raise DropItem("NotImplemented")
 
-    def process_brand(self, item):
-        name = item['brand_name']
-        if name in self.brands:
-            raise DropItem("Duplicate brand name %s" % name)
+    def get_set_brand(self, name):
+        """
+            Step 1: Check if name is None or not.
+            Step 2: Set name to lower(name), for ease of caching.
+            Step 3: If name is in correction, set name to lower(correct name).
+            Step 4: If name brands is in cache, get the cached Brand object.
+            Step 5: Else, create a Brand object with title = original name
+                    (correct but not lower cased). Then store it into the
+                    cache it with name (correct and lower cased) as the key.
+            Step 6: Return the Brand object.
+        """
+        if not name:
+            return None
 
-        if self.brand_corrections.get(name):
-            correction = self.brand_corrections[name]
-            brand = models.Brand(title=correction)
-            self.brands[correction] = brand
-            item['brand_name'] = correction
-        else:
-            brand = models.Brand(title=name)
+        name_original = name
+        name = name_original.lower()
+        if name in self.brand_corrections:
+            name_original = self.brand_corrections[name]
+            name = name_original.lower()
 
-        self.brands[name] = brand
-        self.db.add(brand)
+        if name in Pipeline.brands:
+            return Pipeline.brands[name]
 
-        return item
+        brand = models.Brand(title=name_original)
+
+        Pipeline.brands[name] = brand
+        Pipeline.db.add(brand)
+
+        return brand
 
     def process_product(self, item):
+        item = self.preprocessor.preprocess_product(item)
+
         if item['id'] in self.item_set:
             raise DropItem("Duplicate product")
 
         self.item_set.add(item['id'])
-        self.item_url[item['id']] = item['url']
-
-        item['price_regular'] = int(item['price_regular'].replace(',', ''))
-        item['price'] = int(item['price'].replace(',', ''))
-
-        brand = self.brand_corrections.get(item['brand'], item['brand'])
-        if not self.brands.get(brand):
-            brand_item = models.Brand(title=brand)
-            self.brands[brand] = brand_item
 
         db_item = item.copy()
+
         status = db_item['status']
-        if status.endswith('৳'):
+        if status == 'Available':
             db_item['status'] = models.ItemStatusEnum.AVAILABLE
         elif status == "Out Of Stock":
             db_item['status'] = models.ItemStatusEnum.OUTOFSTOCK
@@ -114,21 +165,15 @@ class GenericmarketinsightPipeline:
             db_item['status'] = models.ItemStatusEnum.CALLFORPRICE
         else:
             # TODO: modify logger's dropped method to be more user friendly.
-            raise DropItem("Item {} has unknown status {}".format(
-                db_item['id'], status))
+            raise DropItem("Item {} has unknown status {}".format(db_item['id'], status))
 
-        db_item['brand'] = self.brands[brand]
-
-        # db_item['reviews'] = [
-        #     models.Review(**review) for review in item['reviews']
-        # ]
+        db_item['brand'] = self.get_set_brand(item['brand'])
 
         db_item['specifications'] = [
             models.Specification(key=spec[0], value=spec[1])
             for spec in item['specifications'].items()
         ]
 
-        self.db.add(models.Product(**db_item))
-        self.load_count += 1
+        Pipeline.db.add(models.Product(**db_item))
 
         return item

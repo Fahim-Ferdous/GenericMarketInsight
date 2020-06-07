@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 
 from enum import IntEnum
-from json import loads
 
 from sqlalchemy import Column, Enum, ForeignKey, Integer, String, create_engine
 from sqlalchemy.ext.declarative import declarative_base
@@ -19,6 +18,7 @@ class ItemStatusEnum(IntEnum):
     CALLFORPRICE = 4
 
 
+# COMBAK: Add product views field.
 class Product(Base):
     __tablename__ = "products"
 
@@ -27,7 +27,6 @@ class Product(Base):
     category = Column(String)
     subcategory1 = Column(String)
     subcategory2 = Column(String)
-    brand = Column(String)
     price_regular = Column(Integer)
     price = Column(Integer)
     url = Column(String)
@@ -35,6 +34,7 @@ class Product(Base):
 
     reviews = relationship("Review", back_populates="product")
     specifications = relationship("Specification", back_populates="product")
+    questions = relationship("Question", back_populates="product")
 
     brand_id = Column(Integer, ForeignKey("brands.id"))
     brand = relationship("Brand", back_populates="products")
@@ -44,7 +44,7 @@ class Brand(Base):
     __tablename__ = "brands"
 
     id = Column(Integer, primary_key=True)
-    title = Column(String)
+    title = Column(String, unique=True)
 
     products = relationship("Product", back_populates="brand")
 
@@ -70,6 +70,18 @@ class Specification(Base):
 
     product_id = Column(String, ForeignKey("products.id"))
     product = relationship("Product", back_populates="specifications")
+
+
+class Question(Base):
+    __tablename__ = "questions"
+
+    id = Column(Integer, primary_key=True)
+    username = Column(String)
+    question = Column(String)
+    answer = Column(String)
+
+    product_id = Column(String, ForeignKey("products.id"))
+    product = relationship("Product", back_populates="questions")
 
 
 DEFAULT_DBURI = 'sqlite:///datadir/db.sqlite3'

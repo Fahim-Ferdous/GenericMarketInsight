@@ -1,6 +1,5 @@
 # -*- coding: utf-8 -*-
 import logging
-from time import sleep
 from urllib.parse import urlparse
 
 import scrapy
@@ -13,21 +12,22 @@ def update_limit_qs(link, limit=72):
 
 
 class RyanscomputersSpider(scrapy.Spider):
+    # TODO: Parse offers.
     name = 'RyansComputers'
     allowed_domains = ['ryanscomputers.com', 'www.ryanscomputers.com']
     start_urls = ['https://ryanscomputers.com']
     brand_cache = {}
     brand_cache_completion = 0
     brands = set()
+    visited = set()
 
     def parse_and_populate_brand_cache(self, response, brand):
         self.brand_cache[response.css(
             '.product-logo img::attr(src)').get()] = brand
         self.brand_cache_completion -= 1
         self.brands.add(brand)
-        yield {
-            'brand_name': brand,
-        }
+        if self.brand_cache_completion == 0:
+            yield response.follow(self.start_urls[0], self.parse_main)
 
     def parse(self, response):
         # Populate url-brand dictionary.
@@ -43,11 +43,7 @@ class RyanscomputersSpider(scrapy.Spider):
         self.log("{} BRANDS AVAILABLE".format(
             self.brand_cache_completion), logging.INFO)
 
-        # Wait until populated
-        while self.brand_cache_completion != 0:
-            sleep(0.01)
-            yield None
-
+    def parse_main(self, response):
         self.log("BRAND CACHE DONE ({} BRANDS)".format(
             len(self.brand_cache)), logging.INFO)
 
@@ -57,7 +53,7 @@ class RyanscomputersSpider(scrapy.Spider):
             subcategory1 = None
             for anchor in item.css('a'):
                 subcategory1 = anchor.css("::text").get().strip() \
-                    if anchor.attrib['class'] == "head-menu"\
+                    if anchor.attrib['class'] == "head-menu" \
                     else subcategory1
                 subcategory2 = None
                 if anchor.attrib['class'] == 'nav-link':
@@ -65,8 +61,8 @@ class RyanscomputersSpider(scrapy.Spider):
 
                 link = anchor.css("::attr(href)").get()
                 path = urlparse(link).path
-                if link == "javascript:void(0);" or\
-                        not path.startswith('/grid') or\
+                if link == "javascript:void(0);" or \
+                        not path.startswith('/grid') or \
                         path.startswith('/grid/all-'):
                     continue
 
@@ -97,23 +93,25 @@ class RyanscomputersSpider(scrapy.Spider):
                     'subcategory2': subcategory2,
                 })
 
-        brand_filters = [brand.strip() for brand in response.css(
-            '.default-brand-filters button::text').extract()
+        brand_filters = [
+            brand.strip() for brand in response.css(
+                '.default-brand-filters button::text').extract()
             if brand.strip() not in self.brands]
 
         for brand in brand_filters:
             self.brands.add(brand)
-            yield {
-                'brand_name': brand,
-            }
 
         brand_filters.extend(self.brand_cache.values())
 
         for box in response.css(".product-box"):
+            product_url = box.css('.product-title-grid::attr(href)').get()
+            if product_url in self.visited:
+                continue
+            self.visited.add(product_url)
             cache_hit = self.brand_cache.get(
                 box.css('.product-logo img::attr(src)').get())
             yield response.follow(
-                box.css('.product-title-grid::attr(href)').get(),
+                product_url,
                 self.parse_product, cb_kwargs={
                     'category': [
                         category,
@@ -126,25 +124,29 @@ class RyanscomputersSpider(scrapy.Spider):
 
     def parse_product(self, response, category, brand):
         details = response.css('.produc-details-short')
-        reviews = []
-        # TODO: Parse all reviews (pagination?) and make a different review item
-        for comment in response.css('.comments'):
-            reviews.append({
+        # FIXME: This is the product code. The real ID is a number.
+        product_id = details.css("p > span::text").get().strip()
+
+        # TODO: Parse all reviews (pagination?) and make a review item
+        yield {
+            'type': 'review',
+            'collection': [{
+                'product_id': product_id,
                 'rating': len(comment.css('.fa-star')),
                 'username': comment.css('p > span::text').get().strip(),
                 'comment': (comment.css(
                     'p:last-child::text').get() or '').strip(),
-            })
+            } for comment in response.css('.comments')]
+        }
 
         specs = {}
         for tr in response.css('.information')[0].css('tr'):
-            specs[tr.css('td:first-child::text').get().strip()] =\
+            specs[tr.css('td:first-child::text').get().strip()] = \
                 tr.css('td:last-child::text').get().strip()
 
         yield {
-            'id': details.css("p > span::text").get().strip(),
+            'id': product_id,
             'title': details.css(".title::text").get().strip(),
-            'reviews': reviews,
             'category': category[0],
             'subcategory1': category[1],
             'subcategory2': category[2],
